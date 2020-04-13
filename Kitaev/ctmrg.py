@@ -79,7 +79,7 @@ def extend_corner4(c4, t3):
     c4t3 = np.tensordot(c4, t3, axes=(1, 0))  # c4t3_{a i b} = c4_{a g} * t3_{g i b}
     return c4t3.reshape((-1, t3.shape[2]))  # c4t3_{(a i) b}
 
-
+'''
 def create_projector_operator(dim, c1, c4):
     """Returns (complex conjugated) projector used for renormalization of corner matrix and transfer matrix.
 
@@ -116,7 +116,13 @@ def create_projector_operator(dim, c1, c4):
     u = np.fliplr(u)
     # return np.conj(u[:, :dim])
     return np.conj(u)
-
+'''
+def create_projector_operator(dim, c1, c4):
+    m1 = np.tensordot(c1, np.conj(c1), axes=(0, 0))
+    m2 = np.tensordot(c4, np.conj(c4), axes=(1, 1))
+    w, u = np.linalg.eigh(m1 + m2)
+    u = np.fliplr(u)
+    return np.conj(u[:, :dim])
 
 def extend_and_project_transfer_matrix(t4, weight, u):
     """
@@ -467,7 +473,7 @@ class CTMRG(object):
                 # print('corner_norm', corner_norm)
                 # print('tm_norm', tm_norm)
 
-    def ctmrg_iteration(self, num_of_steps=100):
+    def ctmrg_iteration(self, num_of_steps=15):
         """Performs at most num_of_steps iterations of ctmrg algorithm and prints energy after each iteration.
     Returns the final energy, "precision", and number of iterations."""
 
