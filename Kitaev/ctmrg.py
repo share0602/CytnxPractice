@@ -508,7 +508,7 @@ class CTMRG(object):
             correlation_length = calculate_correlation_length(self.tms[1], self.tms[3])
             correlation_length_0 = correlation_length[0]
             # correlation_length_02 = calculate_correlation_length(self.tms[0], self.tms[2])
-            print('ctm iter', i, 3 * energy / 2, *correlation_length)
+            # print('ctm iter', i, 3 * energy / 2, *correlation_length)
             # print('ctm iter', i, 3 * energy / 2, correlation_length, correlation_length_02)
             i += 1
 

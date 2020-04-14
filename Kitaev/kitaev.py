@@ -304,14 +304,14 @@ def calculate_dimer_gas_profile(tensor_a, tensor_b, m, file_name='dimer_gas_prof
 model = "Kitaev"
 # model = "Heisenberg"
 
-spin = "1"
+spin = "5/2"
 k = 1.
 h = 0.E-14  # external field - not introduced consistently for all settings
 # print('field', h)
 D = 4  # max virtual (bond) dimension
 m = 16  # bond dimension for coarse-graining (TRG or CTMRG); m should be at least D * D
 
-method = 'CTMRG'  # TRG or CTMRG
+method = 'TRG'  # TRG or CTMRG
 dojob = 'ITE'  # Dimer or ITE
 
 # Only for ITE:
@@ -320,7 +320,7 @@ tau_initial = 1.E-2
 tau_final = 1.E-6
 refresh = 100
 file_name = 'kitaev.txt'  # output file
-
+print('spin:',spin, 'D:',D,'m:',m,'method:',method)
 """
 ########################################################################################################################
                                           End of Parameters Setting Section
@@ -380,11 +380,6 @@ if model == "Kitaev":
     # tensor_a = tensor_a / math.sqrt(np.real(calculate_tensor_norm(tensor_a)))
     # tensor_b = tensor_b / math.sqrt(np.real(calculate_tensor_norm(tensor_b)))
 
-    """
-    lambdas = [np.array([1., 1.]) / math.sqrt(2),
-               np.array([1., 1.]) / math.sqrt(2),
-               np.array([1., 1.]) / math.sqrt(2)]
-    """
 
     lambdas = [np.array([1., 1.], dtype=complex),
                np.array([1., 1.], dtype=complex),
@@ -422,13 +417,6 @@ if dojob == 'Dimer':
     calculate_dimer_gas_profile(tensor_a, tensor_b, m)
     exit()
 
-# tensor_a = tensor_a / math.sqrt(np.real(calculate_tensor_norm(tensor_a)))
-# tensor_b = tensor_b / math.sqrt(np.real(calculate_tensor_norm(tensor_b)))
-
-# print(tensor_a.shape)
-
-# u_gates = [u_gate_x, u_gate_y, u_gate_z]
-# u_gates = np.array([construct_ITE_operator(tau, hamiltonian).reshape(d, d, d, d) for hamiltonian in H])
 
 tau = tau_initial
 # tau = tau_final

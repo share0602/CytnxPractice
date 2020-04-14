@@ -668,8 +668,8 @@ def coarse_graining_procedure(tensor_a, tensor_b, lambdas, dim_cut, model="Kitae
     double_tensor_a = create_double_tensor(tensor_a, lambdas)
     double_tensor_b = create_double_tensor(tensor_b, lambdas)
 
-    print('double_tensor_a.shape', double_tensor_a.shape)
-    print('double_tensor_b.shape', double_tensor_b.shape)
+    # print('double_tensor_g.shape', double_tensor_a.shape)
+    # print('double_tensor_b.shape', double_tensor_b.shape)
 
     # print('double_tensor_a', double_tensor_a)
     # print('double_tensor_b', double_tensor_b)
@@ -707,11 +707,11 @@ def coarse_graining_procedure(tensor_a, tensor_b, lambdas, dim_cut, model="Kitae
     """
 
     if spin == "1/2":
-        spin_rotation_operators = (sx, sy, sz)
+        spin_rotation_operators = (sz, sy, sx)
     elif '/' in spin:
-        spin_rotation_operators = tuple(map(lambda x: -1j * linalg.expm(1j * math.pi * x), (sx, sy, sz)))
+        spin_rotation_operators = tuple(map(lambda x: -1j * linalg.expm(1j * math.pi * x), (sz, sy, sx)))
     else:
-        spin_rotation_operators = tuple(map(lambda x: linalg.expm(1j * math.pi * x), (sx, sy, sz)))
+        spin_rotation_operators = tuple(map(lambda x: linalg.expm(1j * math.pi * x), (sz, sy, sx)))
 
     """
     if spin == "1":
@@ -776,10 +776,10 @@ def coarse_graining_procedure(tensor_a, tensor_b, lambdas, dim_cut, model="Kitae
         measurement = partition_function(ten_a, ten_b, ten_c, ten_d, ten_e, ten_f)
 
         # measurement1 = partition_function(*double_impurity_6ring)
-        print('norm', norm)
+        # print('norm', norm)
         # print('measurement', measurement)
         # print('flux', measurement / norm)
-        print('energy', 1.5 * measurement / norm)
+        # print('energy', 1.5 * measurement / norm)
 
         # impurity_plaquette = create_plaquette(*double_impurity_6ring)  # {x xx y yy z zz}
         # measurement2 = np.einsum('x x y y z z->', impurity_plaquette)
@@ -918,16 +918,16 @@ def coarse_graining_procedure(tensor_a, tensor_b, lambdas, dim_cut, model="Kitae
 
         # print('Expect. iter:', num_of_iter, 'energy:', - (O / norm) / 4)
 
-        # energy_6ring = partition_function(*double_impurity_6ring) / norm
+        energy_6ring = partition_function(*double_impurity_6ring) / norm
         # print('energy_6ring', - 3 * energy_6ring / 2)
-        # print('flux', energy_6ring)
+        print('flux', energy_6ring)
 
         energy_mem = energy
         # energy = energy_6ring
         energy = ox1
         # energy = (ox1 + ox2 + oy1 + oy2 + oz1 + oz2) / (6 * norm)
         # energy = O / norm
-        print('energy', - 3 * energy / 2)
+        # print('energy', - 3 * energy / 2)
 
         # Magnetization calculation at position 0
         """
