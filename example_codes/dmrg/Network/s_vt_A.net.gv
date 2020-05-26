@@ -1,0 +1,16 @@
+graph "s_vt_A.net" {
+	size="6,5"
+	node [shape=circle]
+	s_diag
+	vt
+	A
+	node [shape=plaintext]
+	0
+	1
+	2
+	vt -- A [label=-2]
+	s_diag -- vt [label=-1]
+	0 -- s_diag
+	1 -- A
+	2 -- A
+}

@@ -1,0 +1,20 @@
+graph "R_B_M_Bconj.net" {
+	size="6,5"
+	node [shape=circle]
+	R
+	B
+	M
+	B_Conj
+	node [shape=plaintext]
+	1
+	0
+	2
+	M -- B_Conj [label=-5]
+	B -- M [label=-4]
+	R -- B_Conj [label=-3]
+	R -- M [label=-2]
+	R -- B [label=-1]
+	1 -- B
+	0 -- M
+	2 -- B_Conj
+}

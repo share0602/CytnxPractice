@@ -1,0 +1,25 @@
+graph "psi_L_M1_M2_R.net" {
+	size="6,5"
+	node [shape=circle]
+	psi
+	L
+	M1
+	M2
+	R
+	node [shape=plaintext]
+	0
+	1
+	2
+	3
+	M2 -- R [label=-7]
+	M1 -- M2 [label=-6]
+	L -- M1 [label=-5]
+	psi -- R [label=-4]
+	psi -- M2 [label=-3]
+	psi -- M1 [label=-2]
+	psi -- L [label=-1]
+	0 -- L
+	1 -- M1
+	2 -- M2
+	3 -- R
+}

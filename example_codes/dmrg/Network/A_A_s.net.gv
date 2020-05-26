@@ -1,0 +1,18 @@
+graph "A_A_s.net" {
+	size="6,5"
+	node [shape=circle]
+	A1
+	A2
+	s
+	node [shape=plaintext]
+	0
+	1
+	2
+	3
+	A2 -- s [label=-2]
+	A1 -- A2 [label=-1]
+	0 -- A1
+	1 -- A1
+	2 -- A2
+	3 -- s
+}
