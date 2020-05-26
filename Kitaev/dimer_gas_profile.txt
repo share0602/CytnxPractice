@@ -1,3 +1,0 @@
-# Kitaev S=1 model - 1st order String Gas
-# D=4, m=16
-# phi/pi		Energy			Convergence		Coarse-grain steps
