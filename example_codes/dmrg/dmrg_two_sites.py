@@ -23,7 +23,6 @@ def get_H_psi(psi, L, M1, M2, R):
 def eig_Lanczos(psivec, linFunct, functArgs, maxit=2, krydim=4):
     """ Lanczos method for finding smallest algebraic eigenvector of linear \
     operator defined as a function"""
-    print(psivec.shape())
     psi_columns = cytnx.zeros([len(psivec), krydim + 1]).astype(cytnx.Type.ComplexDouble)
     krylov_matrix = cytnx.zeros([krydim, krydim]).astype(cytnx.Type.ComplexDouble)
     for ik in range(maxit):
