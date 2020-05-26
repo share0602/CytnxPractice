@@ -2,8 +2,9 @@ import numpy as np
 from setting import *
 import cytnx
 from cytnx import cytnx_extension as cyx
-
-
+"""
+References:https://www.tensors.net
+"""
 
 def get_H_psi(psi, L, M1, M2, R):
     ''' psi is Tensor, while L,M1,M2,R are CyTensor.
@@ -298,8 +299,6 @@ if __name__ == '__main__':
     plt.ylabel('Ground Energy Error')
     plt.show()
 
-    # print(En1)
-    # A[5].print_diagram()
 
 
 
