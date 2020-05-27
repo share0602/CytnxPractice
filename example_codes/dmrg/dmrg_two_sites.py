@@ -19,6 +19,7 @@ def get_H_psi(psi, L, M1, M2, R):
     anet.PutCyTensor('R', R);
     H_psi = anet.Launch(optimal=True).reshape(-1).get_block()
     return H_psi
+
 def gs_Arnoldi(psivec, A_funct, functArgs, maxit=2, krydim=4):
     col_vec = cytnx.zeros([len(psivec), krydim +1]).astype(cytnx.Type.ComplexDouble)
     h_ar = cytnx.zeros([krydim+1, krydim]).astype(cytnx.Type.ComplexDouble)
@@ -33,10 +34,10 @@ def gs_Arnoldi(psivec, A_funct, functArgs, maxit=2, krydim=4):
                 u = u - h_ar[i,j].item()*col_vec[:,i]
             h_ar[j+1,j]  = u.Norm()
             eps = 1e-12
-            # print(h_ar[k+1,k])
             if h_ar[j+1,j].Norm().item() > eps:
                 q = u/h_ar[j+1,j].item()
                 col_vec[:, j+1] = q
+        # print(h_ar[:krydim,:])
         [energy, psi_columns_basis] = cytnx.linalg.Eigh(h_ar[:krydim,:])
         psivec = cytnx.linalg.Matmul(col_vec[:, :krydim], psi_columns_basis[:, 0].reshape(krydim, 1)).reshape(-1)
 
@@ -45,31 +46,29 @@ def gs_Arnoldi(psivec, A_funct, functArgs, maxit=2, krydim=4):
     gs_energy = energy[0].item()
     return psivec, gs_energy
 
-def eig_Lanczos(psivec, linFunct, functArgs, maxit=2, krydim=4):
-    """ Lanczos method for finding smallest algebraic eigenvector of linear \
-    operator defined as a function"""
-    psi_columns = cytnx.zeros([len(psivec), krydim + 1]).astype(cytnx.Type.ComplexDouble)
-    krylov_matrix = cytnx.zeros([krydim, krydim]).astype(cytnx.Type.ComplexDouble)
-    for ik in range(maxit):
+def gs_Lanczos(psivec, A_funct, functArgs, maxit=2, krydim=4):
+    col_vec = cytnx.zeros([len(psivec), krydim +1]).astype(cytnx.Type.ComplexDouble)
+    h_la = cytnx.zeros([krydim, krydim]).astype(cytnx.Type.ComplexDouble)
+    for it in range(maxit):
         norm = max(psivec.reshape(-1).Norm().item(), 1e-16)
-        # print(psi_columns[:, 0].shape())
-        psi_columns[:, 0] = psivec / norm
-        for ip in range(1, krydim + 1):
-
-            psi_columns[:, ip] = linFunct(psi_columns[:, ip - 1], *functArgs)
-            for ig in range(ip):
-                krylov_matrix[ip - 1, ig] = cytnx.linalg.Dot(psi_columns[:, ip], psi_columns[:, ig])
-                krylov_matrix[ig, ip - 1] = krylov_matrix[ip - 1, ig].Conj()
-
-            for ig in range(ip):
-                vp = psi_columns[:, ip];
-                vg = psi_columns[:, ig]
-                vp = vp - cytnx.linalg.Dot(vg, vp).item() * vg;
-                norm = max(vp.Norm().item(), 1e-16)
-                psi_columns[:, ip] = vp / norm  ## only access set() once!!
-
-        [energy, psi_columns_basis] = cytnx.linalg.Eigh(krylov_matrix)
-        psivec = cytnx.linalg.Matmul(psi_columns[:, :krydim],psi_columns_basis[:, 0].reshape(krydim,1)).reshape(-1)
+        q = psivec/norm
+        col_vec[:, 0] = q
+        for j in range(krydim):
+            u = A_funct(q, *functArgs)
+            h_la[j,j] = cytnx.linalg.Dot(col_vec[:,j].Conj(), u)
+            if j == 0:
+                u = u - h_la[j, j].item()*col_vec[:, j]
+            else:
+                u = u - h_la[j,j].item()*col_vec[:, j]-h_la[j-1,j].item()*col_vec[:,j-1]
+            if j < krydim-1:
+                h_la[j,j+1] = h_la[j+1,j] = u.Norm()
+                eps = 1e-12
+                if h_la[j+1,j].Norm().item() > eps:
+                    col_vec[:, j + 1] = u/h_la[j+1,j].item()
+            q = col_vec[:, j + 1]
+        # print(h_la)
+        [energy, psi_columns_basis] = cytnx.linalg.Eigh(h_la)
+        psivec = cytnx.linalg.Matmul(col_vec[:, :krydim], psi_columns_basis[:, 0].reshape(krydim, 1)).reshape(-1)
 
     norm = psivec.reshape(-1).Norm().item()
     psivec = psivec / norm
@@ -158,7 +157,7 @@ def dmrg_two_sites(A, ML, M, MR, dim_cut, numsweeps=10, dispon=2, updateon=True,
                 # psi_gs2, Entemp2 = gs_Arnoldi(psi_gs2, get_H_psi, (L[p], M, M, R[p + 1]), maxit=maxit,
                 #                               krydim=krydim)
 
-                psi_gs, Entemp = eig_Lanczos(psi_gs, get_H_psi, (L[p], M, M, R[p + 1]), maxit=maxit,
+                psi_gs, Entemp = gs_Lanczos(psi_gs, get_H_psi, (L[p], M, M, R[p + 1]), maxit=maxit,
                                                krydim=krydim)
                 # print(Entemp2 - Entemp)
                 # exit()
@@ -213,7 +212,7 @@ def dmrg_two_sites(A, ML, M, MR, dim_cut, numsweeps=10, dispon=2, updateon=True,
             if updateon:
                 ## put psi_gs to Tensor for Lanczos algorithm
                 psi_gs = psi_gs.reshape(-1).get_block()
-                psi_gs, Entemp = eig_Lanczos(psi_gs, get_H_psi, (L[p], M, M, R[p + 1]), maxit=maxit,
+                psi_gs, Entemp = gs_Lanczos(psi_gs, get_H_psi, (L[p], M, M, R[p + 1]), maxit=maxit,
                                              krydim=krydim)
                 Ekeep.append(Entemp)
                 psi_gs = cyx.CyTensor(psi_gs.reshape(dim_l, d, d, dim_r), 2)
