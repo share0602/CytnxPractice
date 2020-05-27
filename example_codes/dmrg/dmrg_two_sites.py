@@ -19,6 +19,31 @@ def get_H_psi(psi, L, M1, M2, R):
     anet.PutCyTensor('R', R);
     H_psi = anet.Launch(optimal=True).reshape(-1).get_block()
     return H_psi
+def gs_Arnoldi(psivec, A_funct, functArgs, maxit=2, krydim=4):
+    col_vec = cytnx.zeros([len(psivec), krydim +1]).astype(cytnx.Type.ComplexDouble)
+    h_ar = cytnx.zeros([krydim+1, krydim]).astype(cytnx.Type.ComplexDouble)
+    for it in range(maxit):
+        norm = max(psivec.reshape(-1).Norm().item(), 1e-16)
+        q = psivec/norm
+        col_vec[:, 0] = q
+        for j in range(krydim):
+            u = A_funct(q, *functArgs)
+            for i in range(j+1):
+                h_ar[i,j] = cytnx.linalg.Dot(col_vec[:,i].Conj(), u)
+                u = u - h_ar[i,j].item()*col_vec[:,i]
+            h_ar[j+1,j]  = u.Norm()
+            eps = 1e-12
+            # print(h_ar[k+1,k])
+            if h_ar[j+1,j].Norm().item() > eps:
+                q = u/h_ar[j+1,j].item()
+                col_vec[:, j+1] = q
+        [energy, psi_columns_basis] = cytnx.linalg.Eigh(h_ar[:krydim,:])
+        psivec = cytnx.linalg.Matmul(col_vec[:, :krydim], psi_columns_basis[:, 0].reshape(krydim, 1)).reshape(-1)
+
+    norm = psivec.reshape(-1).Norm().item()
+    psivec = psivec / norm
+    gs_energy = energy[0].item()
+    return psivec, gs_energy
 
 def eig_Lanczos(psivec, linFunct, functArgs, maxit=2, krydim=4):
     """ Lanczos method for finding smallest algebraic eigenvector of linear \
@@ -129,9 +154,16 @@ def dmrg_two_sites(A, ML, M, MR, dim_cut, numsweeps=10, dispon=2, updateon=True,
             if updateon:
                 ## put psi_gs to Tensor for Lanczos algorithm
                 psi_gs = psi_gs.reshape(-1).get_block()
+                # psi_gs2 = psi_gs.clone()
+                # psi_gs2, Entemp2 = gs_Arnoldi(psi_gs2, get_H_psi, (L[p], M, M, R[p + 1]), maxit=maxit,
+                #                               krydim=krydim)
+
                 psi_gs, Entemp = eig_Lanczos(psi_gs, get_H_psi, (L[p], M, M, R[p + 1]), maxit=maxit,
                                                krydim=krydim)
+                # print(Entemp2 - Entemp)
+                # exit()
                 Ekeep.append(Entemp)
+
                 psi_gs = cyx.CyTensor(psi_gs.reshape(dim_l, d, d, dim_r), 2)
 
             dim_new = min(dim_l*d, dim_r*d, dim_cut)
