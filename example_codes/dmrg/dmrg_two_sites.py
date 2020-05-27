@@ -32,18 +32,16 @@ def eig_Lanczos(psivec, linFunct, functArgs, maxit=2, krydim=4):
         for ip in range(1, krydim + 1):
 
             psi_columns[:, ip] = linFunct(psi_columns[:, ip - 1], *functArgs)
-
             for ig in range(ip):
                 krylov_matrix[ip - 1, ig] = cytnx.linalg.Dot(psi_columns[:, ip], psi_columns[:, ig])
                 krylov_matrix[ig, ip - 1] = krylov_matrix[ip - 1, ig].Conj()
 
             for ig in range(ip):
-                # print(cytnx.linalg.Dot(psi_columns[:, ig], psi_columns[:, ip]))
-                psi_columns[:, ip] = psi_columns[:, ip] - cytnx.linalg.Dot(psi_columns[:, ig], psi_columns[:, ip]).item()\
-                                     * psi_columns[:, ig]
-                # print('psi_columns[:,ip].reshape(-1).Norm().item() = ', psi_columns[:,ip].reshape(-1).Norm().item())
-                norm =  max(psi_columns[:,ip].reshape(-1).Norm().item(), 1e-16)
-                psi_columns[:, ip] = psi_columns[:, ip] / norm
+                vp = psi_columns[:, ip];
+                vg = psi_columns[:, ig]
+                vp = vp - cytnx.linalg.Dot(vg, vp).item() * vg;
+                norm = max(vp.Norm().item(), 1e-16)
+                psi_columns[:, ip] = vp / norm  ## only access set() once!!
 
         [energy, psi_columns_basis] = cytnx.linalg.Eigh(krylov_matrix)
         psivec = cytnx.linalg.Matmul(psi_columns[:, :krydim],psi_columns_basis[:, 0].reshape(krydim,1)).reshape(-1)
