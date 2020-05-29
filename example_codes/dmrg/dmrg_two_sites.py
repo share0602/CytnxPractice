@@ -1,7 +1,9 @@
-import numpy as np
 from setting import *
 import cytnx
 from cytnx import cytnx_extension as cyx
+import numpy as np
+from numpy import linalg
+import copy
 """
 References:https://www.tensors.net
 """
@@ -9,6 +11,7 @@ References:https://www.tensors.net
 def get_H_psi(psi, L, M1, M2, R):
     ''' psi is Tensor, while L,M1,M2,R are CyTensor.
     Return: h|psi> (Tensor)'''
+    psi = cytnx.from_numpy(psi)
     psi = cyx.CyTensor(psi,0)
     psi = psi.reshape(L.shape()[1], M1.shape()[2], M2.shape()[2], R.shape()[1])
     anet = cyx.Network("Network/psi_L_M1_M2_R.net")
@@ -17,62 +20,58 @@ def get_H_psi(psi, L, M1, M2, R):
     anet.PutCyTensor("M1", M1);
     anet.PutCyTensor('M2', M2);
     anet.PutCyTensor('R', R);
-    H_psi = anet.Launch(optimal=True).reshape(-1).get_block()
+    H_psi = anet.Launch(optimal=True).reshape(-1).get_block().numpy()
     return H_psi
 
-def gs_Arnoldi(psivec, A_funct, functArgs, maxit=2, krydim=4):
-    col_vec = cytnx.zeros([len(psivec), krydim +1]).astype(cytnx.Type.ComplexDouble)
-    h_ar = cytnx.zeros([krydim+1, krydim]).astype(cytnx.Type.ComplexDouble)
+def gs_Arnoldi_numpy(psivec, A_funct, functArgs, maxit=2, krydim=10):
+    q = np.zeros([len(psivec), krydim+1], dtype=complex)
+    h_ar = np.zeros([krydim+1, krydim], dtype=complex)
     for it in range(maxit):
-        norm = max(psivec.reshape(-1).Norm().item(), 1e-16)
-        q = psivec/norm
-        col_vec[:, 0] = q
+        q[:,0] = psivec/linalg.norm(psivec)
         for j in range(krydim):
-            u = A_funct(q, *functArgs)
+            u = A_funct(q[:,j], *functArgs)
             for i in range(j+1):
-                h_ar[i,j] = cytnx.linalg.Dot(col_vec[:,i].Conj(), u)
-                u = u - h_ar[i,j].item()*col_vec[:,i]
-            h_ar[j+1,j]  = u.Norm()
+                h_ar[i, j] = np.conj(q[:, i]) @ u
+                u = u - h_ar[i,j]*q[:,i]
+            h_ar[j+1,j]  = linalg.norm(u)
             eps = 1e-12
-            if h_ar[j+1,j].Norm().item() > eps:
-                q = u/h_ar[j+1,j].item()
-                col_vec[:, j+1] = q
-        # print(h_ar[:krydim,:])
-        [energy, psi_columns_basis] = cytnx.linalg.Eigh(h_ar[:krydim,:])
-        psivec = cytnx.linalg.Matmul(col_vec[:, :krydim], psi_columns_basis[:, 0].reshape(krydim, 1)).reshape(-1)
-
-    norm = psivec.reshape(-1).Norm().item()
-    psivec = psivec / norm
-    gs_energy = energy[0].item()
+            if linalg.norm(u) > eps:
+                q[:,j+1] = u/linalg.norm(u)
+        ## Arnoldi done
+        [energy, psi_basis] = linalg.eigh(h_ar[:krydim,:])
+        # print('h_ar = ', h_ar)
+        psivec = q[:, :krydim] @ psi_basis[:, 0] ## basis transformation
+    psivec = psivec / linalg.norm(psivec)
+    gs_energy = energy[0]
     return psivec, gs_energy
 
-def gs_Lanczos(psivec, A_funct, functArgs, maxit=2, krydim=4):
-    col_vec = cytnx.zeros([len(psivec), krydim +1]).astype(cytnx.Type.ComplexDouble)
-    h_la = cytnx.zeros([krydim, krydim]).astype(cytnx.Type.ComplexDouble)
+def gs_Lanczos_numpy(psivec, A_funct, functArgs, maxit=2, krydim=10):
+    q = np.zeros([len(psivec), krydim + 1], dtype=complex)
+    h_la = np.zeros([krydim , krydim], dtype=complex)
     for it in range(maxit):
-        norm = max(psivec.reshape(-1).Norm().item(), 1e-16)
-        q = psivec/norm
-        col_vec[:, 0] = q
+        q[:, 0] = psivec/linalg.norm(psivec)
         for j in range(krydim):
-            u = A_funct(q, *functArgs)
-            h_la[j,j] = cytnx.linalg.Dot(col_vec[:,j].Conj(), u)
+            u = A_funct(q[:,j], *functArgs)
+            h_la[j,j] = np.conj(q[:,j])@ u
             if j == 0:
-                u = u - h_la[j, j].item()*col_vec[:, j]
+                u = u - h_la[j,j]*q[:, j]
             else:
-                u = u - h_la[j,j].item()*col_vec[:, j]-h_la[j-1,j].item()*col_vec[:,j-1]
+                u = u - h_la[j,j]*q[:, j]-h_la[j-1,j]*q[:,j-1]
             if j < krydim-1:
-                h_la[j,j+1] = h_la[j+1,j] = u.Norm()
+                h_la[j,j+1] = h_la[j+1,j] = linalg.norm(u)
                 eps = 1e-12
-                if h_la[j+1,j].Norm().item() > eps:
-                    col_vec[:, j + 1] = u/h_la[j+1,j].item()
-            q = col_vec[:, j + 1]
-        # print(h_la)
-        [energy, psi_columns_basis] = cytnx.linalg.Eigh(h_la)
-        psivec = cytnx.linalg.Matmul(col_vec[:, :krydim], psi_columns_basis[:, 0].reshape(krydim, 1)).reshape(-1)
+                if linalg.norm(u) > eps:
+                    q[:, j + 1] = u/linalg.norm(u)
+                else:
+                    krydim = j + 1
+                    print('Krylov space = %d is large enough!'%krydim)
+                    break
+        # print('h_la = ', h_la)
+        [energy, psi_basis] = linalg.eigh(h_la[:krydim,:krydim])
+        psivec = q[:,:krydim] @ psi_basis[:,0]
 
-    norm = psivec.reshape(-1).Norm().item()
-    psivec = psivec / norm
-    gs_energy = energy[0].item()
+    psivec = psivec / linalg.norm(psivec)
+    gs_energy = energy[0]
     return psivec, gs_energy
 
 '''
@@ -152,17 +151,17 @@ def dmrg_two_sites(A, ML, M, MR, dim_cut, numsweeps=10, dispon=2, updateon=True,
 
             if updateon:
                 ## put psi_gs to Tensor for Lanczos algorithm
-                psi_gs = psi_gs.reshape(-1).get_block()
-                # psi_gs2 = psi_gs.clone()
-                # psi_gs2, Entemp2 = gs_Arnoldi(psi_gs2, get_H_psi, (L[p], M, M, R[p + 1]), maxit=maxit,
+
+                psi_gs = psi_gs.reshape(-1).get_block().numpy()
+                # psi_gs2 = copy.deepcopy(psi_gs)
+                # psi_gs2, Entemp2 = gs_Arnoldi_numpy(psi_gs2, get_H_psi, (L[p], M, M, R[p + 1]), maxit=maxit,
                 #                               krydim=krydim)
 
-                psi_gs, Entemp = gs_Lanczos(psi_gs, get_H_psi, (L[p], M, M, R[p + 1]), maxit=maxit,
+                psi_gs, Entemp = gs_Lanczos_numpy(psi_gs, get_H_psi, (L[p], M, M, R[p + 1]), maxit=maxit,
                                                krydim=krydim)
                 # print(Entemp2 - Entemp)
-                # exit()
                 Ekeep.append(Entemp)
-
+                psi_gs = cytnx.from_numpy(psi_gs)
                 psi_gs = cyx.CyTensor(psi_gs.reshape(dim_l, d, d, dim_r), 2)
 
             dim_new = min(dim_l*d, dim_r*d, dim_cut)
@@ -211,10 +210,11 @@ def dmrg_two_sites(A, ML, M, MR, dim_cut, numsweeps=10, dispon=2, updateon=True,
 
             if updateon:
                 ## put psi_gs to Tensor for Lanczos algorithm
-                psi_gs = psi_gs.reshape(-1).get_block()
-                psi_gs, Entemp = gs_Lanczos(psi_gs, get_H_psi, (L[p], M, M, R[p + 1]), maxit=maxit,
+                psi_gs = psi_gs.reshape(-1).get_block().numpy()
+                psi_gs, Entemp = gs_Lanczos_numpy(psi_gs, get_H_psi, (L[p], M, M, R[p + 1]), maxit=maxit,
                                              krydim=krydim)
                 Ekeep.append(Entemp)
+                psi_gs = cytnx.from_numpy(psi_gs)
                 psi_gs = cyx.CyTensor(psi_gs.reshape(dim_l, d, d, dim_r), 2)
 
             dim_new = min(dim_l * d, dim_r * d, dim_cut)
@@ -319,8 +319,8 @@ if __name__ == '__main__':
     ##### Plot results
     plt.figure(1)
     plt.yscale('log')
-    plt.plot(range(len(En1)), En1 - EnExact, 'b', label="chi = 16", marker = 'o')
-    plt.plot(range(len(En2)), En2 - EnExact, 'r', label="chi = 32", marker = 'o')
+    plt.plot(range(len(En1)), En1 - EnExact, 'b', label="chi = 16")
+    plt.plot(range(len(En2)), En2 - EnExact, 'r', label="chi = 32")
     plt.legend()
     plt.title('DMRG for XX model')
     plt.xlabel('Update Step')
@@ -329,4 +329,61 @@ if __name__ == '__main__':
 
 
 
+
+'''
+def gs_Arnoldi(psivec, A_funct, functArgs, maxit=2, krydim=4):
+    col_vec = cytnx.zeros([len(psivec), krydim +1]).astype(cytnx.Type.ComplexDouble)
+    h_ar = cytnx.zeros([krydim+1, krydim]).astype(cytnx.Type.ComplexDouble)
+    for it in range(maxit):
+        norm = max(psivec.reshape(-1).Norm().item(), 1e-16)
+        q = psivec/norm
+        col_vec[:, 0] = q
+        for j in range(krydim):
+            u = A_funct(q, *functArgs)
+            for i in range(j+1):
+                h_ar[i,j] = cytnx.linalg.Dot(col_vec[:,i].Conj(), u)
+                u = u - h_ar[i,j].item()*col_vec[:,i]
+            h_ar[j+1,j]  = u.Norm()
+            eps = 1e-12
+            if h_ar[j+1,j].Norm().item() > eps:
+                q = u/h_ar[j+1,j].item()
+                col_vec[:, j+1] = q
+        # print(h_ar[:krydim,:])
+        [energy, psi_columns_basis] = cytnx.linalg.Eigh(h_ar[:krydim,:])
+        psivec = cytnx.linalg.Matmul(col_vec[:, :krydim], psi_columns_basis[:, 0].reshape(krydim, 1)).reshape(-1)
+
+    norm = psivec.reshape(-1).Norm().item()
+    psivec = psivec / norm
+    gs_energy = energy[0].item()
+    return psivec, gs_energy
+
+def gs_Lanczos(psivec, A_funct, functArgs, maxit=2, krydim=4):
+    col_vec = cytnx.zeros([len(psivec), krydim +1]).astype(cytnx.Type.ComplexDouble)
+    h_la = cytnx.zeros([krydim, krydim]).astype(cytnx.Type.ComplexDouble)
+    for it in range(maxit):
+        norm = max(psivec.reshape(-1).Norm().item(), 1e-16)
+        q = psivec/norm
+        col_vec[:, 0] = q
+        for j in range(krydim):
+            u = A_funct(q, *functArgs)
+            h_la[j,j] = cytnx.linalg.Dot(col_vec[:,j].Conj(), u)
+            if j == 0:
+                u = u - h_la[j, j].item()*col_vec[:, j]
+            else:
+                u = u - h_la[j,j].item()*col_vec[:, j]-h_la[j-1,j].item()*col_vec[:,j-1]
+            if j < krydim-1:
+                h_la[j,j+1] = h_la[j+1,j] = u.Norm()
+                eps = 1e-12
+                if h_la[j+1,j].Norm().item() > eps:
+                    col_vec[:, j + 1] = u/h_la[j+1,j].item()
+            q = col_vec[:, j + 1]
+        # print(h_la)
+        [energy, psi_columns_basis] = cytnx.linalg.Eigh(h_la)
+        psivec = cytnx.linalg.Matmul(col_vec[:, :krydim], psi_columns_basis[:, 0].reshape(krydim, 1)).reshape(-1)
+
+    norm = psivec.reshape(-1).Norm().item()
+    psivec = psivec / norm
+    gs_energy = energy[0].item()
+    return psivec, gs_energy
+'''
 
