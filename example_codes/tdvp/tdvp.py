@@ -6,11 +6,14 @@ from cytnx import cytnx_extension as cyx
 """
 References:https://www.tensors.net
 """
+# path = ''
 
 def one_site_H_psi(psi, L, W,R):
     ''' psi is Tensor, while L,M1,M2,R are CyTensor.
     Return: h|psi> (Tensor)'''
     psi = cytnx.from_numpy(psi)
+    # print(psi.shape())
+    # print(L.shape(), W.shape(), R.shape())
     psi = psi.reshape(L.shape()[1], W.shape()[2], R.shape()[1])
     psi = cyx.CyTensor(psi,2)
     anet = cyx.Network("Network/psi_L_W_R.net")
@@ -73,7 +76,7 @@ def gs_Lanczos_numpy(psivec, A_funct, functArgs, maxit=2, krydim=10):
                     q[:, j + 1] = u/linalg.norm(u)
                 else:
                     krydim = j + 1
-                    print('Krylov space = %d is large enough!'%krydim)
+                    print('Krylov space = %spaced is large enough!'%krydim)
                     break
         # print('h_la = ', h_la)
         [energy, psi_basis] = linalg.eigh(h_la[:krydim,:krydim])
@@ -102,7 +105,7 @@ def exp_Lanczos_numpy(psivec, A_funct, functArgs, dt,maxit=2, krydim=10):
                     q[:, j + 1] = u / linalg.norm(u)
                 else:
                     krydim = j + 1
-                    print('Krylov space = %d is large enough!' % krydim)
+                    # print('Krylov space = %d is large enough!' % krydim)
                     break
         # print('h_la = ', h_la)
         [energy, psi_basis] = linalg.eigh(h_la[:krydim, :krydim])
@@ -135,6 +138,16 @@ def get_new_R(R, B, W, B_Conj):
     anet.PutCyTensor('B_Conj', B_Conj);
     R = anet.Launch(optimal=True)
     return R
+
+
+def absorb_remain(M, utemp, stemp):
+    anet = cyx.Network("Network/M_u_s.net")
+    anet.PutCyTensor('M', M)
+    anet.PutCyTensor('u', utemp)
+    anet.PutCyTensor('s', stemp)
+    M_1 = anet.Launch(optimal=True)
+    return M_1
+
 '''
 ########################################################################################################################
                                         ########## Main Function ##########
@@ -142,31 +155,30 @@ def get_new_R(R, B, W, B_Conj):
 '''
 def tdvp_one_site(M, WL, W, WR, dt, numsweeps=10, dispon=2, updateon=True, maxit=1, krydim=10):
     d = M[0].shape()[2]  # physical dimension
-    Nsites = len(M) # A is a list
-    A = [0] * Nsites
-    B = [0] * Nsites
-    EE = [[0]*Nsites]*(2*numsweeps+1)
-    L = [0]*Nsites; # Left boundary for each MPS
+    Nsites = len(M) # M is a list
+    A = [None] * Nsites # left orthogonal tensor
+    B = [None] * Nsites # right orthogonal tensor
+    # EE = [[None]*Nsites]*(2*numsweeps+1)
+    # EE = np.zeros([Nsites-2, 2*numsweeps+1])
+    EE_all_time = []
+    EE = np.zeros([Nsites-1])
+    L = [None]*Nsites; # Left boundary for each MPS
     L[0] = WL
-    R = [0]*Nsites; # Right boundary for each MPS
+    R = [None]*Nsites; # Right boundary for each MPS
     R[Nsites - 1] = WR
     '''
         ########## Warm up: Put M into right orthogonal form ##########
     '''
     for p in range(Nsites - 1, 0, -1):
         stemp, utemp, B[p] = cyx.xlinalg.Svd(M[p])
-        anet = cyx.Network("Network/M_u_s.net")
-        anet.PutCyTensor('M',M[p-1])
-        anet.PutCyTensor('u',utemp)
-        anet.PutCyTensor('s',stemp)
-        M[p-1] = anet.Launch(optimal = True)
+        M[p-1] = absorb_remain(M[p-1], utemp, stemp)
         R[p-1] = get_new_R(R[p],B[p],W,B[p].Conj())
     dim_l = 1; dim_r = M[0].shape()[2]
     Mtemp = M[0].get_block().reshape(dim_l, d*dim_r)
     _,_,B[0] = cytnx.linalg.Svd(Mtemp)
     B[0] = B[0].reshape(dim_l, d, dim_r)
     B[0] = cyx.CyTensor(B[0], 1)
-    Ac = B[0]
+    Ac = B[0] ## One-site center to do update
     '''
             ########## TDVP sweep begin ##########
     '''
@@ -184,7 +196,7 @@ def tdvp_one_site(M, WL, W, WR, dt, numsweeps=10, dispon=2, updateon=True, maxit
             # print('p = ', p)
             if updateon:
                 ## put psi_gs to Tensor for Lanczos algorithm
-                dim_l = Ac.shape()[0];
+                dim_l = Ac.shape()[0]; # Used to reshape Ac_new later
                 dim_r = Ac.shape()[2]
                 ############ Numpy Begin: Update one site
                 Ac_old = Ac.get_block().reshape(-1).numpy()
@@ -195,8 +207,11 @@ def tdvp_one_site(M, WL, W, WR, dt, numsweeps=10, dispon=2, updateon=True, maxit
                 stemp, A[p], vTtemp = cyx.xlinalg.Svd(Ac_new)
                 ############ Entanglement entropy
                 s_np = stemp.get_block().numpy()
-                Evec = s_np**2*np.log(s_np)
-                EE[2*k-1][p] = -2/np.log(2)*np.sum(Evec)
+                s_np[s_np <1.e-20] = 0.
+                assert abs(np.linalg.norm(s_np) - 1.) < 1.e-14
+                S2 = s_np**2
+                EE[p] = -np.sum(S2*np.log(S2))
+                # print(EE[2*k-2,p])
 
                 C_old = cyx.Contract(stemp,vTtemp)
                 dim_l = C_old.shape()[0]; dim_r = C_old.shape()[1]
@@ -209,14 +224,20 @@ def tdvp_one_site(M, WL, W, WR, dt, numsweeps=10, dispon=2, updateon=True, maxit
                 C_new = C_new.reshape(dim_l, dim_r)
                 C_new = cyx.CyTensor(C_new, 1)
                 C_new.set_labels([0,-2])
-
+                if p == Nsites-2:
+                    B[Nsites-1].set_labels([-2,2,3])
                 Ac = cyx.Contract(C_new, B[p+1])
-
             ##### display energy
             if dispon == 2:
                 print('Sweep: %d of %d, Loc: %d,Energy: %f' % (k, numsweeps, p, E[0]))
+        EE_all_time.append(EE.copy())
+        # print(EE_all_time)
+        # C_new.print_diagram()
+        # B[p+1].print_diagram()
+        # Ac.print_diagram()
         dim_l = Ac.shape()[0];
         dim_r = Ac.shape()[2]
+        # print(Ac.shape())
         Ac_old = Ac.get_block().reshape(-1).numpy()
         Ac_new, E = exp_Lanczos_numpy(Ac_old, one_site_H_psi, (L[Nsites-1], W, R[Nsites-1]),\
                                       0, maxit=maxit, krydim=krydim)
@@ -228,8 +249,10 @@ def tdvp_one_site(M, WL, W, WR, dt, numsweeps=10, dispon=2, updateon=True, maxit
                 stemp, utemp, B[p+1] = cyx.xlinalg.Svd(Ac)
                 ############ Entanglement entropy
                 s_np = stemp.get_block().numpy()
-                Evec = s_np ** 2 * np.log(s_np)
-                EE[2 * k][p] = -2 / np.log(2) * np.sum(Evec)
+                s_np[s_np < 1.e-20] = 0.
+                assert abs(np.linalg.norm(s_np) - 1.) < 1.e-14
+                S2 = s_np ** 2
+                EE[p] = -np.sum(S2 * np.log(S2))
                 C_old = cyx.Contract(stemp, utemp)
                 dim_l = C_old.shape()[0];
                 dim_r = C_old.shape()[1]
@@ -256,18 +279,28 @@ def tdvp_one_site(M, WL, W, WR, dt, numsweeps=10, dispon=2, updateon=True, maxit
                 ############ Numpy End
                 Ac_new = cyx.CyTensor(Ac_new.reshape(dim_l, d, dim_r), 1)
                 Ac =  Ac_new
+        if dispon == 1:
+            print('Sweep: %d of %d, Energy: %.8f, Bond dim: %d' % (k, numsweeps, E[0], chi))
+        EE_all_time.append(EE.copy())
+        # EE = 0
+        # EE_all_time.append(EE)
+        # print(EE_all_time)
+        # exit()
 
-
-    return EE, A, B
+    return EE_all_time, A, B
 
 if __name__ == '__main__':
+    import sys
+    sys.path.insert(0, '../')
+    from dmrg.dmrg_two_sites import dmrg_two_sites
     ##### XX model
     ##### Set bond dimensions and simulation options
-    chi = 16;
-    Nsites = 20;
+    chi = 20;
+    Nsites = 10;
+    model = 'Ising'
 
-    OPTS_numsweeps = 4 # number of DMRG sweeps
-    OPTS_dispon = 2 # level of output display
+    OPTS_numsweeps = 3 # number of DMRG sweeps
+    OPTS_dispon = 1 # level of output display
     OPTS_updateon = True # level of output display
     OPTS_maxit = 1 # iterations of Lanczos method
     OPTS_krydim = 5 # dimension of Krylov subspace
@@ -277,32 +310,54 @@ if __name__ == '__main__':
     '''
     d = 2
     s = 0.5
-    sx = cytnx.physics.spin(0.5,'x')
-    sy = cytnx.physics.spin(0.5,'y')
-    sp = sx+1j*sy
-    sm = sx-1j*sy
+    sx = cytnx.physics.spin(0.5, 'x')
+    sy = cytnx.physics.spin(0.5, 'y')
+    sz = cytnx.physics.spin(0.5, 'y')
+    sp = sx + 1j * sy
+    sm = sx - 1j * sy
     eye = cytnx.eye(d).astype(cytnx.Type.ComplexDouble)
-    W = cytnx.zeros([4, 4, d, d]).astype(cytnx.Type.ComplexDouble)
-    W[0, 0, :, :] = W[3, 3, :, :] = eye
-    W[0, 1, :, :] = W[2, 3, :, :] = 2 ** 0.5 * sp
-    W[0, 2, :, :] = W[1, 3, :, :] = 2 ** 0.5 * sm
-    WL = cytnx.zeros([4, 1, 1]).astype(cytnx.Type.ComplexDouble)
-    WR = cytnx.zeros([4, 1, 1]).astype(cytnx.Type.ComplexDouble)
-    WL[0, 0, 0] = 1.; WR[3, 0, 0] = 1.
-    W = cyx.CyTensor(W, 0); WR = cyx.CyTensor(WR, 0); WL = cyx.CyTensor(WL, 0)
+    if model == 'XX':
+        W = cytnx.zeros([4, 4, d, d]).astype(cytnx.Type.ComplexDouble)
+        W[0, 0, :, :] = W[3, 3, :, :] = eye
+        W[0, 1, :, :] = W[2, 3, :, :] = 2 ** 0.5 * sp
+        W[0, 2, :, :] = W[1, 3, :, :] = 2 ** 0.5 * sm
+        WL = cytnx.zeros([4, 1, 1]).astype(cytnx.Type.ComplexDouble)
+        WR = cytnx.zeros([4, 1, 1]).astype(cytnx.Type.ComplexDouble)
+        WL[0, 0, 0] = 1.;
+        WR[3, 0, 0] = 1.
+    if model == 'Ising':
+        W = cytnx.zeros([3, 3, d, d]).astype(cytnx.Type.ComplexDouble)
+        W[0, 0, :, :] = W[2, 2, :, :] = eye
+        W[0, 1, :, :] = sx * 2
+        W[0, 2, :, :] = -1.0 * (sz * 2)  ## g
+        W[1, 2, :, :] = sx * 2
+        WL = cytnx.zeros([3, 1, 1]).astype(cytnx.Type.ComplexDouble)
+        WR = cytnx.zeros([3, 1, 1]).astype(cytnx.Type.ComplexDouble)
+        WL[0, 0, 0] = 1.;
+        WR[2, 0, 0] = 1.
+    W = cyx.CyTensor(W, 0);
+    WR = cyx.CyTensor(WR, 0);
+    WL = cyx.CyTensor(WL, 0)
     M = [0] * Nsites
     M[0] = cytnx.random.normal([1, d, min(chi, d)], 0., 1.)
-    # A[0] = np.random.rand(1,chid,min(chi,chid))
-
     for k in range(1,Nsites):
         dim1 = M[k - 1].shape()[2]; dim2 = d;
         dim3 = min(min(chi, M[k - 1].shape()[2] * d), d ** (Nsites - k - 1));
         M[k] = cytnx.random.normal([dim1, dim2, dim3], 0., 1.)
     ## Transform M to CyTensor
-    M = [cyx.CyTensor(M[i], 1) for i in range(len(M))]
-    EE, A,B = tdvp_one_site(M, WL, W, WR, 0.01, numsweeps = OPTS_numsweeps, dispon = OPTS_dispon,
-                                       updateon = OPTS_updateon, maxit = OPTS_maxit, krydim = OPTS_krydim)
-    print(EE)
+    # M = [cyx.CyTensor(M[i], 1) for i in range(len(M))]
+    M = [cyx.CyTensor(M[i], 2) for i in range(len(M))]
+
+    En1, A, sWeight, B = dmrg_two_sites(M, WL, W, WR, chi, numsweeps=OPTS_numsweeps, dispon=OPTS_dispon,
+                                        updateon=OPTS_updateon, maxit=OPTS_maxit, krydim=OPTS_krydim)
+    # print('-'*50)
+    print('TDVP begin!')
+    # print('-' * 50)
+    EE, A,B = tdvp_one_site(B, WL, W, WR, 0.01, numsweeps = 10, dispon = OPTS_dispon,
+                                       updateon = OPTS_updateon, maxit = OPTS_maxit, krydim = 30)
+    # print(EE)
+    # for i in range(len(EE)):
+    #     print(EE[i])
     exit()
 
 

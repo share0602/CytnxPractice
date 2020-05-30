@@ -4,6 +4,10 @@ from cytnx import cytnx_extension as cyx
 import numpy as np
 from numpy import linalg
 import copy
+# import os
+path = '/Users/chenyuxue/PycharmProjects/kitaev_cytnx/examples/dmrg/'
+# path = str(os.path.abspath(path)) +'/'
+# print(os.path.abspath(path))
 """
 References:https://www.tensors.net
 """
@@ -14,7 +18,7 @@ def get_H_psi(psi, L, M1, M2, R):
     psi = cytnx.from_numpy(psi)
     psi = cyx.CyTensor(psi,0)
     psi = psi.reshape(L.shape()[1], M1.shape()[2], M2.shape()[2], R.shape()[1])
-    anet = cyx.Network("Network/psi_L_M1_M2_R.net")
+    anet = cyx.Network(path+"Network/psi_L_M1_M2_R.net")
     anet.PutCyTensor("psi", psi);
     anet.PutCyTensor("L", L);
     anet.PutCyTensor("M1", M1);
@@ -74,8 +78,61 @@ def gs_Lanczos_numpy(psivec, A_funct, functArgs, maxit=2, krydim=10):
     gs_energy = energy[0]
     return psivec, gs_energy
 
+
+def absorb_right(s, vt, A):
+    anet = cyx.Network(path + "Network/s_vt_A.net")
+    ## A[p+1] = s@vt@A[p+1]
+    anet.PutCyTensor("s_diag", s);
+    anet.PutCyTensor("vt", vt);
+    anet.PutCyTensor("A", A);
+    A_1 = anet.Launch(optimal=True)
+    return A_1
+
+
+def get_new_L(L, A, M, Aconj):
+    anet = cyx.Network(path + "Network/L_A_M_Aconj.net")
+    ## L[p+1] = L[p+1]*A[p]*A[p].Conj()*M
+    anet.PutCyTensor("L", L);
+    anet.PutCyTensor("A", A);
+    anet.PutCyTensor("M", M);
+    anet.PutCyTensor('A_Conj', Aconj);
+    L_1 = anet.Launch(optimal=True)
+    return L_1
+
+
+def get_psi_from_left(A1, A2, s):
+    anet = cyx.Network(path + "Network/A_A_s.net")
+    ## psi = A[p-1]*A[p]*s[p+1]
+    anet.PutCyTensor("A1", A1);
+    anet.PutCyTensor("A2", A2);
+    anet.PutCyTensor("s",s);
+    psi_gs = anet.Launch(optimal=True)
+    return psi_gs
+
+
+def get_new_R(R, B, M, Bconj):
+    anet = cyx.Network(path + "Network/R_B_M_Bconj.net")
+    ## R[P] = R[p+1]*B[p+1]*B[p+1].conj()*M
+    anet.PutCyTensor("R", R);
+    anet.PutCyTensor("B", B);
+    anet.PutCyTensor("M", M);
+    anet.PutCyTensor('B_Conj', Bconj);
+    R_1 = anet.Launch(optimal=True)
+    return R_1
+
+
+def get_psi_from_right(s, B1, B2):
+    anet = cyx.Network(path + "Network/s_B_B.net")
+    ## psi = s[p]*B[p]*B[p+1]
+    anet.PutCyTensor("s", s);
+    anet.PutCyTensor("B1", B1);
+    anet.PutCyTensor("B2", B2);
+    psi_gs = anet.Launch(optimal=True)
+    return psi_gs
 '''
-########## Main Function ##########
+########################################################################################################################
+                                    ########## Main Function ##########
+########################################################################################################################
 '''
 def dmrg_two_sites(A, ML, M, MR, dim_cut, numsweeps=10, dispon=2, updateon=True, maxit=2, krydim=4):
     '''
@@ -96,20 +153,10 @@ def dmrg_two_sites(A, ML, M, MR, dim_cut, numsweeps=10, dispon=2, updateon=True,
     '''
     for p in range(Nsites - 1):
         s_diag, A[p], vt = cyx.xlinalg.Svd(A[p])
-        anet = cyx.Network("Network/s_vt_A.net")
-        ## A[p+1] = s@vt@A[p+1]
-        anet.PutCyTensor("s_diag", s_diag);
-        anet.PutCyTensor("vt", vt);
-        anet.PutCyTensor("A", A[p+1]);
-        A[p+1] = anet.Launch(optimal = True)
-        anet = cyx.Network("Network/L_A_M_Aconj.net")
-        ## L[p+1] = L[p+1]*A[p]*A[p].Conj()*M
-        anet.PutCyTensor("L", L[p]);
-        anet.PutCyTensor("A", A[p]);
-        anet.PutCyTensor("M", M);
-        anet.PutCyTensor('A_Conj', A[p].Conj());
-        L[p + 1] = anet.Launch(optimal=True)
 
+        A[p+1] = absorb_right(s_diag, vt, A[p + 1])
+
+        L[p+1] = get_new_L(L[p], A[p], M, A[p].Conj())
     ## Initialiaze s_weight
     s_weight = [0] * (Nsites + 1)
     ## Specify A[final] and s[final]
@@ -142,13 +189,7 @@ def dmrg_two_sites(A, ML, M, MR, dim_cut, numsweeps=10, dispon=2, updateon=True,
             ##### two-site update
             dim_l = A[p].shape()[0];
             dim_r = A[p + 1].shape()[2];
-            anet = cyx.Network("Network/A_A_s.net")
-            ## psi = A[p-1]*A[p]*s[p+1]
-            anet.PutCyTensor("A1", A[p]);
-            anet.PutCyTensor("A2", A[p+1]);
-            anet.PutCyTensor("s", s_weight[p+2]);
-            psi_gs = anet.Launch(optimal=True)
-
+            psi_gs = get_psi_from_left(A[p], A[p+1], s_weight[p+2])
             if updateon:
                 ## put psi_gs to Tensor for Lanczos algorithm
 
@@ -156,7 +197,7 @@ def dmrg_two_sites(A, ML, M, MR, dim_cut, numsweeps=10, dispon=2, updateon=True,
                 # psi_gs2 = copy.deepcopy(psi_gs)
                 # psi_gs2, Entemp2 = gs_Arnoldi_numpy(psi_gs2, get_H_psi, (L[p], M, M, R[p + 1]), maxit=maxit,
                 #                               krydim=krydim)
-
+                # print(psi_gs.shape)
                 psi_gs, Entemp = gs_Lanczos_numpy(psi_gs, get_H_psi, (L[p], M, M, R[p + 1]), maxit=maxit,
                                                krydim=krydim)
                 # print(Entemp2 - Entemp)
@@ -170,13 +211,8 @@ def dmrg_two_sites(A, ML, M, MR, dim_cut, numsweeps=10, dispon=2, updateon=True,
             s_weight[p+1] = s_weight[p+1]/norm
 
             # ##### new block Hamiltonian
-            anet = cyx.Network("Network/R_B_M_Bconj.net")
-            ## R[P] = R[p+1]*B[p+1]*B[p+1].conj()*M
-            anet.PutCyTensor("R", R[p+1]);
-            anet.PutCyTensor("B", B[p+1]);
-            anet.PutCyTensor("M", M);
-            anet.PutCyTensor('B_Conj', B[p+1].Conj());
-            R[p] = anet.Launch(optimal=True)
+
+            R[p] = get_new_R(R[p+1], B[p+1], M, B[p+1].Conj())
             if dispon == 2:
                 print('Sweep: %d of %d, Loc: %d,Energy: %f' % (k, numsweeps, p, Ekeep[-1]))
 
@@ -201,13 +237,8 @@ def dmrg_two_sites(A, ML, M, MR, dim_cut, numsweeps=10, dispon=2, updateon=True,
             ##### two-site update
             dim_l = s_weight[p].shape()[0];
             dim_r = B[p+1].shape()[2]
-            anet = cyx.Network("Network/s_B_B.net")
-            ## psi = s[p]*B[p]*B[p+1]
-            anet.PutCyTensor("s", s_weight[p]);
-            anet.PutCyTensor("B1", B[p]);
-            anet.PutCyTensor("B2", B[p+1]);
-            psi_gs = anet.Launch(optimal=True)
 
+            psi_gs = get_psi_from_right(s_weight[p], B[p], B[p+1])
             if updateon:
                 ## put psi_gs to Tensor for Lanczos algorithm
                 psi_gs = psi_gs.reshape(-1).get_block().numpy()
@@ -223,13 +254,7 @@ def dmrg_two_sites(A, ML, M, MR, dim_cut, numsweeps=10, dispon=2, updateon=True,
             s_weight[p + 1] = s_weight[p + 1] / norm
 
             ##### new block Hamiltonian
-            anet = cyx.Network("Network/L_A_M_Aconj.net")
-            ## L[p+1] = L[p+1]*A[p]*A[p].Conj()*M
-            anet.PutCyTensor("L", L[p]);
-            anet.PutCyTensor("A", A[p]);
-            anet.PutCyTensor("M", M);
-            anet.PutCyTensor('A_Conj', A[p].Conj());
-            L[p + 1] = anet.Launch(optimal=True)
+            L[p+1] = get_new_L(L[p], A[p], M, A[p].Conj())
 
             ##### display energy
             if dispon == 2:
@@ -248,19 +273,18 @@ def dmrg_two_sites(A, ML, M, MR, dim_cut, numsweeps=10, dispon=2, updateon=True,
         s_weight[Nsites] = cyx.CyTensor([cyx.Bond(1), cyx.Bond(1)], rowrank=1, is_diag=True)
         s_weight[Nsites].put_block(cytnx.ones(1));
 
-        # if dispon == 1:
-        #     print('Sweep: %d of %d, Energy: %12.12d, Bond dim: %d' % (k, numsweeps, Ekeep[-1], chi))
+        if dispon == 1:
+            print('Sweep: %d of %d, Energy: %.8f, Bond dim: %d' % (k, numsweeps, Ekeep[-1], dim_cut))
 
     return Ekeep, A, s_weight, B
 
 if __name__ == '__main__':
-    ##### XX model
     ##### Set bond dimensions and simulation options
-    chi = 16;
-    Nsites = 20;
-
-    OPTS_numsweeps = 4 # number of DMRG sweeps
-    OPTS_dispon = 2 # level of output display
+    chi = 20;
+    Nsites = 10;
+    model = 'Ising' # Ising or XX
+    OPTS_numsweeps = 6 # number of DMRG sweeps
+    OPTS_dispon = 1 # level of output display
     OPTS_updateon = True # level of output display
     OPTS_maxit = 2 # iterations of Lanczos method
     OPTS_krydim = 4 # dimension of Krylov subspace
@@ -272,42 +296,49 @@ if __name__ == '__main__':
     s = 0.5
     sx = cytnx.physics.spin(0.5,'x')
     sy = cytnx.physics.spin(0.5,'y')
+    sz = cytnx.physics.spin(0.5, 'y')
     sp = sx+1j*sy
     sm = sx-1j*sy
     eye = cytnx.eye(d).astype(cytnx.Type.ComplexDouble)
-    M = cytnx.zeros([4, 4, d, d]).astype(cytnx.Type.ComplexDouble)
-    M[0,0,:,:] = M[3,3,:,:] = eye
-    M[0,1,:,:] = M[2,3,:,:] = 2**0.5*sp
-    M[0,2,:,:] = M[1,3,:,:] = 2**0.5*sm
-    ML = cytnx.zeros([4,1,1]).astype(cytnx.Type.ComplexDouble)
-    MR = cytnx.zeros([4,1,1]).astype(cytnx.Type.ComplexDouble)
-    ML[0,0,0] = 1.; MR[3,0,0] = 1.
-    M = cyx.CyTensor(M,0); MR = cyx.CyTensor(MR,0); ML = cyx.CyTensor(ML,0)
-    A = [0]*Nsites
-    A[0] = cytnx.random.normal([1, d, min(chi, d)], 0., 1.)
+    if model == 'XX':
+        W = cytnx.zeros([4, 4, d, d]).astype(cytnx.Type.ComplexDouble)
+        W[0,0,:,:] = W[3,3,:,:] = eye
+        W[0,1,:,:] = W[2,3,:,:] = 2**0.5*sp
+        W[0,2,:,:] = W[1,3,:,:] = 2**0.5*sm
+        WL = cytnx.zeros([4, 1, 1]).astype(cytnx.Type.ComplexDouble)
+        WR = cytnx.zeros([4, 1, 1]).astype(cytnx.Type.ComplexDouble)
+        WL[0, 0, 0] = 1.;
+        WR[3, 0, 0] = 1.
+    if model == 'Ising':
+        W = cytnx.zeros([3, 3, d, d]).astype(cytnx.Type.ComplexDouble)
+        W[0,0, :,:] = W[2,2,:,:] = eye
+        W[0,1,:,:] = sx*2
+        W[0,2,:,:] = -1.0*(sz*2) ## g
+        W[1,2,:,:] = sx*2
+        WL = cytnx.zeros([3, 1, 1]).astype(cytnx.Type.ComplexDouble)
+        WR = cytnx.zeros([3, 1, 1]).astype(cytnx.Type.ComplexDouble)
+        WL[0, 0, 0] = 1.;
+        WR[2, 0, 0] = 1.
+
+
+    W = cyx.CyTensor(W,0); WR = cyx.CyTensor(WR, 0); WL = cyx.CyTensor(WL, 0)
+    M = [0]*Nsites
+    M[0] = cytnx.random.normal([1, d, min(chi, d)], 0., 1.)
     # A[0] = np.random.rand(1,chid,min(chi,chid))
 
     for k in range(1,Nsites):
-        dim1 = A[k-1].shape()[2]; dim2 = d;
-        dim3 = min(min(chi, A[k-1].shape()[2] * d), d ** (Nsites - k - 1));
-        A[k] = cytnx.random.normal([dim1, dim2, dim3],0.,1.)
+        dim1 = M[k-1].shape()[2]; dim2 = d;
+        dim3 = min(min(chi, M[k-1].shape()[2] * d), d ** (Nsites - k - 1));
+        M[k] = cytnx.random.normal([dim1, dim2, dim3],0.,1.)
     ## Transform A to
-    A = [cyx.CyTensor(A[i], 2) for i in range(len(A))]
-    En1, A, sWeight, B = dmrg_two_sites(A,ML,M,MR,chi, numsweeps = OPTS_numsweeps, dispon = OPTS_dispon,
-                                    updateon = OPTS_updateon, maxit = OPTS_maxit, krydim = OPTS_krydim)
-    # print(sWeight[0])
-    # print(sWeight[1])
-    # print(sWeight[Nsites - 1])
-    # print(sWeight[Nsites])
-    # exit()
-
-    # for i in range(len(sWeight)):
-    #     print(sWeight[i].shape())
-    # exit()
+    M = [cyx.CyTensor(M[i], 2) for i in range(len(M))]
+    En1, A, sWeight, B = dmrg_two_sites(M, WL, W, WR, chi, numsweeps = OPTS_numsweeps, dispon = OPTS_dispon,
+                                        updateon = OPTS_updateon, maxit = OPTS_maxit, krydim = OPTS_krydim)
+    exit()
     #### Increase bond dim and reconverge
     chi = 32;
-    En2, A, sWeight, B = dmrg_two_sites(A,ML,M,MR,chi, numsweeps = OPTS_numsweeps, dispon = OPTS_dispon,
-                                    updateon = OPTS_updateon, maxit = OPTS_maxit, krydim = OPTS_krydim)
+    En2, A, sWeight, B = dmrg_two_sites(A, WL, M, WR, chi, numsweeps = OPTS_numsweeps, dispon = OPTS_dispon,
+                                        updateon = OPTS_updateon, maxit = OPTS_maxit, krydim = OPTS_krydim)
 
     #### Compare with exact results (computed from free fermions)
     from numpy import linalg as LA
