@@ -41,7 +41,7 @@ for k in range(RGstep):
     U1 = cyx.Contract(utmp, s_sqrt)
     V1 = cyx.Contract(s_sqrt, vtmp)
     V1.permute_([1,2,0])
-    ## C U2, V2
+    ## Construct U2, V2
     T.permute_([3,0,1,2])
     stmp, utmp, vtmp = cyx.xlinalg.Svd_truncate(T,chitemp)
     s_sqrt = stmp**0.5
